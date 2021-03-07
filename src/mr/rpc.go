@@ -39,7 +39,7 @@ type WorkReply struct {
 
 	taskId       int
 	fileName     string
-	workName     string
+	taskName     string
 	bucketNumber int
 }
 

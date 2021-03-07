@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"log"
@@ -72,6 +73,34 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// TODO: dispatch map work
+	for k, v := range m.files {
+		if m.mapTasks[k] != TaskIdle {
+			continue
+		}
+		reply.taskId = k
+		reply.fileName = v
+		reply.taskName = "map"
+		reply.bucketNumber = m.nReduce
+		reply.ifFinished = false
+		m.workerCommit[args.workerId] = TaskWorking
+		m.mapTasks[k] = TaskWorking
+
+		ctx, _ := context.WithTimeout(context.Background(), m.timeout)
+		go func() {
+			select {
+			case <-ctx.Done():
+				{
+					m.mu.Lock()
+					defer m.mu.Unlock()
+					if m.workerCommit[args.workerId] != TaskCommit && m.mapTasks[k] != TaskCommit {
+						m.mapTasks[k] = TaskIdle
+						log.Println("[Error]:", "worker:", args.workerId, "map task:", k, "timeout")
+					}
+				}
+			}
+		}()
+		return nil
+	}
 
 	// TODO: dispatch reduce work
 
