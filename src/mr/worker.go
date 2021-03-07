@@ -1,6 +1,8 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
@@ -33,6 +35,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	w := worker{}
 	w.mapf = mapf
 	w.reducef = reducef
+	w.register()
+	w.run()
 
 	// uncomment to send the Example RPC to the master.
 	// CallExample()
@@ -40,9 +44,28 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 type worker struct {
-	id      int
+	id      string
 	mapf    func(string, string) []KeyValue
 	reducef func(string, []string) string
+}
+
+func (w *worker) register() {
+	args := &RegisterArgs{}
+	reply := &RegisterReply{}
+	if ok := call("Master.RegWorker", args, reply); !ok {
+		log.Fatal("reg fail")
+	}
+	w.id = reply.workerId
+}
+
+func (w *worker) run() {
+	retry := 3
+	for {
+		args := WorkArgs{workerId: w.id}
+		reply := WorkReply{}
+		working := call("Master.Work", &args, &reply)
+
+	}
 }
 
 //
