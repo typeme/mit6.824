@@ -154,6 +154,46 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 
 }
 
+func (m *Master) commit(args *CommitArgs, reply *CommitReply) error {
+	log.Println("worker id ", args.workerId, "commit a ", args.taskName, "task id ", args.taskId)
+	m.mu.Lock()
+	switch args.taskName {
+	case "map":
+		{
+			m.mapCount++
+			m.mapTasks[args.taskId] = TaskCommit
+			m.workerCommit[args.workerId] = TaskCommit
+
+		}
+	case "reduce":
+		{
+			m.reducesTasks[args.taskId] = TaskCommit
+			m.workerCommit[args.workerId] = TaskCommit
+		}
+
+	}
+	m.mu.Unlock()
+
+	log.Println("current", m.mapTasks, m.reducesTasks)
+
+	for _, v := range m.mapTasks {
+		if v != TaskCommit {
+			return nil
+		}
+	}
+
+	for _, v := range m.reducesTasks {
+		if v != TaskCommit {
+			return nil
+		}
+	}
+
+	m.allCommitted = true
+	log.Println("all tasks completed")
+	return nil
+
+}
+
 //
 // start a thread that listens for RPCs from worker.go
 //
@@ -175,11 +215,10 @@ func (m *Master) server() {
 // if the entire job has finished.
 //
 func (m *Master) Done() bool {
-	ret := false
 
 	// Your code here.
 
-	return ret
+	return m.allCommitted
 }
 
 //

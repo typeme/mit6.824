@@ -1,7 +1,12 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strconv"
 	"time"
 )
 import "log"
@@ -15,6 +20,14 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -95,11 +108,96 @@ func (w *worker) run() {
 	}
 }
 
-func mapWork(reply WorkReply, mapf func(string, string) []KeyValue) {
+func mapWork(task WorkReply, mapf func(string, string) []KeyValue) {
+	file, err := os.Open(task.fileName)
+	if err != nil {
+		log.Fatalf("cannot open %v", task.fileName)
+	}
 
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.fileName)
+	}
+
+	kvs := mapf(task.fileName, string(content))
+
+	sort.Sort(ByKey(kvs))
+
+	tempName := "mr-tmep-" + strconv.Itoa(task.taskId)
+	fileBucket := make(map[int]*json.Encoder)
+	for i := 0; i < task.bucketNumber; i++ {
+		ofile, _ := os.Create(tempName + "-" + strconv.Itoa(i))
+		defer ofile.Close()
+		fileBucket[i] = json.NewEncoder(ofile)
+	}
+
+	for _, kv := range kvs {
+		key := kv.Key
+		reduce_idx := ihash(key) % task.bucketNumber
+		err := fileBucket[reduce_idx].Encode(&kv)
+		if err != nil {
+			log.Fatal("Unable to write to file")
+		}
+
+	}
 }
 
-func reduceWork(reply WorkReply, reducef func(string, []string) string) {
+func reduceWork(task WorkReply, reducef func(string, []string) string) {
+	intermediate := []KeyValue{}
+
+	for mapTaskNumber := 0; mapTaskNumber < task.bucketNumber; mapTaskNumber++ {
+		fileName := "mr-tmp-" + strconv.Itoa(mapTaskNumber) + "-" + strconv.Itoa(task.taskId)
+		f, err := os.Open(fileName)
+		defer f.Close()
+		if err != nil {
+			log.Fatal("Unable to read from: ", fileName)
+		}
+
+		decoder := json.NewDecoder(f)
+		var kv KeyValue
+		for decoder.More() {
+			err := decoder.Decode(&kv)
+			if err != nil {
+				log.Fatal("Json decode failed, ", err)
+			}
+			intermediate = append(intermediate, kv)
+		}
+
+		sort.Sort(ByKey(intermediate))
+
+		oname := "mr-out-"
+		ofile, err := os.Create(oname + strconv.Itoa(task.taskId+1))
+		defer ofile.Close()
+		if err != nil {
+			log.Fatal("Unable to create file: ", ofile)
+		}
+		log.Println("complete to ", task.taskId, "start to write in to ", ofile)
+
+		//
+		// call Reduce on each distinct key in intermediate[],
+		// and print the result to mr-out-0.
+		//
+		i := 0
+		for i < len(intermediate) {
+			j := i + 1
+			for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+				j++
+			}
+			values := []string{}
+			for k := i; k < j; k++ {
+				values = append(values, intermediate[k].Value)
+			}
+			output := reducef(intermediate[i].Key, values)
+
+			// this is the correct format for each line of Reduce output.
+			fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+			i = j
+		}
+
+		ofile.Close()
+
+	}
 
 }
 
