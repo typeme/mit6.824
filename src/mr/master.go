@@ -3,6 +3,7 @@ package mr
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -72,7 +73,7 @@ func (m *Master) RegWorker(arg *RegisterReply, reply *RegisterReply) error {
 func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// TODO: dispatch map work
+	// dispatch map work
 	for k, v := range m.files {
 		if m.mapTasks[k] != TaskIdle {
 			continue
@@ -81,7 +82,7 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 		reply.fileName = v
 		reply.taskName = "map"
 		reply.bucketNumber = m.nReduce
-		reply.ifFinished = false
+		reply.isFinished = false
 		m.workerCommit[args.workerId] = TaskWorking
 		m.mapTasks[k] = TaskWorking
 
@@ -99,12 +100,57 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 				}
 			}
 		}()
+		log.Println("a worker", args.workerId, "apply a map task:", *reply)
 		return nil
 	}
 
-	// TODO: dispatch reduce work
+	// dispatch reduce work
 
-	// TODO: check if all work have committed
+	for k, v := range m.reducesTasks {
+		// judge if all map works have finished
+		if m.mapCount != len(m.files) {
+			return nil
+		}
+		if v != TaskIdle {
+			continue
+		}
+		reply.taskId = k
+		reply.fileName = ""
+		reply.taskName = "reduce"
+		reply.bucketNumber = len(m.files)
+		reply.isFinished = false
+		m.workerCommit[args.workerId] = TaskWorking
+		m.reducesTasks[k] = TaskWorking
+
+		ctx, _ := context.WithTimeout(context.Background(), m.timeout)
+		go func() {
+			select {
+			case <-ctx.Done():
+				{
+					m.mu.Lock()
+					defer m.mu.Unlock()
+					if m.workerCommit[args.workerId] != TaskCommit && m.reducesTasks[k] != TaskCommit {
+						m.reducesTasks[k] = TaskIdle
+						log.Println("[Error]:", "worker:", args.workerId, "reduce task:", k, "timeout")
+					}
+				}
+			}
+		}()
+		log.Println("a worker", args.workerId, "apply a reduce task:", *reply)
+		return nil
+	}
+
+	// check if all work have committed
+
+	for _, v := range m.workerCommit {
+		if v == TaskWorking {
+			reply.isFinished = false
+			return nil
+		}
+	}
+
+	reply.isFinished = true
+	return errors.New("no tasks dispatch")
 
 }
 

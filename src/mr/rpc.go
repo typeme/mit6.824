@@ -35,12 +35,22 @@ type WorkArgs struct {
 }
 
 type WorkReply struct {
-	ifFinished bool
+	isFinished bool
 
 	taskId       int
 	fileName     string
 	taskName     string
 	bucketNumber int
+}
+
+type CommitArgs struct {
+	workerId string
+	taskId   int
+	taskName string
+}
+
+type CommitReply struct {
+	isOk bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name

@@ -2,6 +2,7 @@ package mr
 
 import (
 	"fmt"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -65,7 +66,41 @@ func (w *worker) run() {
 		reply := WorkReply{}
 		working := call("Master.Work", &args, &reply)
 
+		if reply.isFinished || !working {
+			log.Println("finished")
+			return
+		}
+
+		switch reply.taskName {
+		case "map":
+			mapWork(reply, w.mapf)
+			retry = 3
+
+		case "reduce":
+			reduceWork(reply, w.reducef)
+			retry = 3
+		default:
+			log.Println("error reply: would retry times: ", retry)
+			if retry < 0 {
+				return
+			}
+			retry--
+		}
+
+		commitArgs := CommitArgs{workerId: w.id, taskId: reply.taskId, taskName: reply.taskName}
+		commitReply := CommitReply{}
+		_ = call("Master.commit", &commitArgs, &commitReply)
+
+		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+func mapWork(reply WorkReply, mapf func(string, string) []KeyValue) {
+
+}
+
+func reduceWork(reply WorkReply, reducef func(string, []string) string) {
+
 }
 
 //
