@@ -2,14 +2,13 @@ package mr
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -50,15 +49,17 @@ func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
-func genWorkerId() (uuid string) {
-	unix32bits := uint32(time.Now().UTC().Unix())
-	buff := make([]byte, 12)
-	numRead, err := rand.Read(buff)
-
-	if numRead != len(buff) || err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf("%x-%x-%x-%x-%x-%x\n", unix32bits, buff[0:2], buff[2:4], buff[4:6], buff[6:8], buff[8:])
+func (m *Master) genWorkerId() (uuid string) {
+	//unix32bits := uint32(time.Now().UTC().Unix())
+	//buff := make([]byte, 12)
+	//numRead, err := rand.Read(buff)
+	//
+	//if numRead != len(buff) || err != nil {
+	//	panic(err)
+	//}
+	//
+	//return fmt.Sprintf("%x-%x-%x-%x-%x-%x\n", unix32bits, buff[0:2], buff[2:4], buff[4:6], buff[6:8], buff[8:])
+	return strconv.Itoa(m.workerNum)
 
 }
 
@@ -66,7 +67,7 @@ func (m *Master) RegWorker(arg *RegisterReply, reply *RegisterReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.workerNum++
-	reply.workerId = genWorkerId()
+	reply.WorkId = m.genWorkerId()
 	return nil
 }
 
@@ -78,12 +79,12 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 		if m.mapTasks[k] != TaskIdle {
 			continue
 		}
-		reply.taskId = k
-		reply.fileName = v
-		reply.taskName = "map"
-		reply.bucketNumber = m.nReduce
-		reply.isFinished = false
-		m.workerCommit[args.workerId] = TaskWorking
+		reply.TaskId = k
+		reply.FileName = v
+		reply.TaskName = "map"
+		reply.BucketName = m.nReduce
+		reply.IsFinished = false
+		m.workerCommit[args.WorkId] = TaskWorking
 		m.mapTasks[k] = TaskWorking
 
 		ctx, _ := context.WithTimeout(context.Background(), m.timeout)
@@ -93,14 +94,14 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 				{
 					m.mu.Lock()
 					defer m.mu.Unlock()
-					if m.workerCommit[args.workerId] != TaskCommit && m.mapTasks[k] != TaskCommit {
+					if m.workerCommit[args.WorkId] != TaskCommit && m.mapTasks[k] != TaskCommit {
 						m.mapTasks[k] = TaskIdle
-						log.Println("[Error]:", "worker:", args.workerId, "map task:", k, "timeout")
+						log.Println("[Error]:", "worker:", args.WorkId, "map task:", k, "timeout")
 					}
 				}
 			}
 		}()
-		log.Println("a worker", args.workerId, "apply a map task:", *reply)
+		log.Println("a worker", args.WorkId, "apply a map task:", *reply)
 		return nil
 	}
 
@@ -114,12 +115,12 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 		if v != TaskIdle {
 			continue
 		}
-		reply.taskId = k
-		reply.fileName = ""
-		reply.taskName = "reduce"
-		reply.bucketNumber = len(m.files)
-		reply.isFinished = false
-		m.workerCommit[args.workerId] = TaskWorking
+		reply.TaskId = k
+		reply.FileName = ""
+		reply.TaskName = "reduce"
+		reply.BucketName = len(m.files)
+		reply.IsFinished = false
+		m.workerCommit[args.WorkId] = TaskWorking
 		m.reducesTasks[k] = TaskWorking
 
 		ctx, _ := context.WithTimeout(context.Background(), m.timeout)
@@ -129,14 +130,14 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 				{
 					m.mu.Lock()
 					defer m.mu.Unlock()
-					if m.workerCommit[args.workerId] != TaskCommit && m.reducesTasks[k] != TaskCommit {
+					if m.workerCommit[args.WorkId] != TaskCommit && m.reducesTasks[k] != TaskCommit {
 						m.reducesTasks[k] = TaskIdle
-						log.Println("[Error]:", "worker:", args.workerId, "reduce task:", k, "timeout")
+						log.Println("[Error]:", "worker:", args.WorkId, "reduce task:", k, "timeout")
 					}
 				}
 			}
 		}()
-		log.Println("a worker", args.workerId, "apply a reduce task:", *reply)
+		log.Println("a worker", args.WorkId, "apply a reduce task:", *reply)
 		return nil
 	}
 
@@ -144,31 +145,31 @@ func (m *Master) Work(args *WorkArgs, reply *WorkReply) error {
 
 	for _, v := range m.workerCommit {
 		if v == TaskWorking {
-			reply.isFinished = false
+			reply.IsFinished = false
 			return nil
 		}
 	}
 
-	reply.isFinished = true
+	reply.IsFinished = true
 	return errors.New("no tasks dispatch")
 
 }
 
-func (m *Master) commit(args *CommitArgs, reply *CommitReply) error {
-	log.Println("worker id ", args.workerId, "commit a ", args.taskName, "task id ", args.taskId)
+func (m *Master) Commit(args *CommitArgs, reply *CommitReply) error {
+	log.Println("worker id ", args.WorkerId, "commit a ", args.TaskName, "task id ", args.TaskId)
 	m.mu.Lock()
-	switch args.taskName {
+	switch args.TaskName {
 	case "map":
 		{
 			m.mapCount++
-			m.mapTasks[args.taskId] = TaskCommit
-			m.workerCommit[args.workerId] = TaskCommit
+			m.mapTasks[args.TaskId] = TaskCommit
+			m.workerCommit[args.WorkerId] = TaskCommit
 
 		}
 	case "reduce":
 		{
-			m.reducesTasks[args.taskId] = TaskCommit
-			m.workerCommit[args.workerId] = TaskCommit
+			m.reducesTasks[args.TaskId] = TaskCommit
+			m.workerCommit[args.WorkerId] = TaskCommit
 		}
 
 	}
@@ -232,8 +233,9 @@ func MakeMaster(files []string, nReduce int) *Master {
 		nReduce:      nReduce,
 		mapTasks:     make([]int, len(files)),
 		reducesTasks: make([]int, nReduce),
+		workerCommit: make(map[string]int),
 		allCommitted: false,
-		timeout:      10 * time.Millisecond,
+		timeout:      500 * time.Millisecond,
 		workerNum:    0,
 	}
 

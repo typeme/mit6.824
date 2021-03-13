@@ -27,30 +27,30 @@ type RegisterArgs struct {
 }
 
 type RegisterReply struct {
-	workerId string
+	WorkId string
 }
 
 type WorkArgs struct {
-	workerId string
+	WorkId string
 }
 
 type WorkReply struct {
-	isFinished bool
+	IsFinished bool
 
-	taskId       int
-	fileName     string
-	taskName     string
-	bucketNumber int
+	TaskId     int
+	FileName   string
+	TaskName   string
+	BucketName int
 }
 
 type CommitArgs struct {
-	workerId string
-	taskId   int
-	taskName string
+	WorkerId string
+	TaskId   int
+	TaskName string
 }
 
 type CommitReply struct {
-	isOk bool
+	IsOk bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name

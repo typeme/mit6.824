@@ -69,22 +69,22 @@ func (w *worker) register() {
 	if ok := call("Master.RegWorker", args, reply); !ok {
 		log.Fatal("reg fail")
 	}
-	w.id = reply.workerId
+	w.id = reply.WorkId
 }
 
 func (w *worker) run() {
 	retry := 3
 	for {
-		args := WorkArgs{workerId: w.id}
+		args := WorkArgs{WorkId: w.id}
 		reply := WorkReply{}
 		working := call("Master.Work", &args, &reply)
 
-		if reply.isFinished || !working {
+		if reply.IsFinished || !working {
 			log.Println("finished")
 			return
 		}
 
-		switch reply.taskName {
+		switch reply.TaskName {
 		case "map":
 			mapWork(reply, w.mapf)
 			retry = 3
@@ -100,32 +100,32 @@ func (w *worker) run() {
 			retry--
 		}
 
-		commitArgs := CommitArgs{workerId: w.id, taskId: reply.taskId, taskName: reply.taskName}
+		commitArgs := CommitArgs{WorkerId: w.id, TaskId: reply.TaskId, TaskName: reply.TaskName}
 		commitReply := CommitReply{}
-		_ = call("Master.commit", &commitArgs, &commitReply)
+		_ = call("Master.Commit", &commitArgs, &commitReply)
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2000 * time.Millisecond)
 	}
 }
 
 func mapWork(task WorkReply, mapf func(string, string) []KeyValue) {
-	file, err := os.Open(task.fileName)
+	file, err := os.Open(task.FileName)
 	if err != nil {
-		log.Fatalf("cannot open %v", task.fileName)
+		log.Fatalf("cannot open %v", task.FileName)
 	}
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		log.Fatalf("cannot read %v", task.fileName)
+		log.Fatalf("cannot read %v", task.FileName)
 	}
 
-	kvs := mapf(task.fileName, string(content))
+	kvs := mapf(task.FileName, string(content))
 
 	sort.Sort(ByKey(kvs))
 
-	tempName := "mr-tmep-" + strconv.Itoa(task.taskId)
+	tempName := "mr-tmp-" + strconv.Itoa(task.TaskId)
 	fileBucket := make(map[int]*json.Encoder)
-	for i := 0; i < task.bucketNumber; i++ {
+	for i := 0; i < task.BucketName; i++ {
 		ofile, _ := os.Create(tempName + "-" + strconv.Itoa(i))
 		defer ofile.Close()
 		fileBucket[i] = json.NewEncoder(ofile)
@@ -133,7 +133,7 @@ func mapWork(task WorkReply, mapf func(string, string) []KeyValue) {
 
 	for _, kv := range kvs {
 		key := kv.Key
-		reduce_idx := ihash(key) % task.bucketNumber
+		reduce_idx := ihash(key) % task.BucketName
 		err := fileBucket[reduce_idx].Encode(&kv)
 		if err != nil {
 			log.Fatal("Unable to write to file")
@@ -145,11 +145,12 @@ func mapWork(task WorkReply, mapf func(string, string) []KeyValue) {
 func reduceWork(task WorkReply, reducef func(string, []string) string) {
 	intermediate := []KeyValue{}
 
-	for mapTaskNumber := 0; mapTaskNumber < task.bucketNumber; mapTaskNumber++ {
-		fileName := "mr-tmp-" + strconv.Itoa(mapTaskNumber) + "-" + strconv.Itoa(task.taskId)
+	for mapTaskNumber := 0; mapTaskNumber < task.BucketName; mapTaskNumber++ {
+		fileName := "mr-tmp-" + strconv.Itoa(mapTaskNumber) + "-" + strconv.Itoa(task.TaskId)
 		f, err := os.Open(fileName)
 		defer f.Close()
 		if err != nil {
+			log.Println(err)
 			log.Fatal("Unable to read from: ", fileName)
 		}
 
@@ -166,12 +167,12 @@ func reduceWork(task WorkReply, reducef func(string, []string) string) {
 		sort.Sort(ByKey(intermediate))
 
 		oname := "mr-out-"
-		ofile, err := os.Create(oname + strconv.Itoa(task.taskId+1))
+		ofile, err := os.Create(oname + strconv.Itoa(task.TaskId+1))
 		defer ofile.Close()
 		if err != nil {
 			log.Fatal("Unable to create file: ", ofile)
 		}
-		log.Println("complete to ", task.taskId, "start to write in to ", ofile)
+		log.Println("complete to ", task.TaskId, "start to write in to ", ofile)
 
 		//
 		// call Reduce on each distinct key in intermediate[],
